@@ -21,6 +21,6 @@ func VersionMiddleware(next http.Handler) http.Handler {
 			return
 		}
 
-		http.Error(w, "API version not specified. Use /v1 or /v2", http.StatusBadRequest)
+		next.ServeHTTP(w, r)
 	})
 }

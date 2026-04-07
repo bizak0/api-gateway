@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 
+	"github.com/bizak0/api-gateway/internal/gateway/adaptor"
 	"github.com/bizak0/api-gateway/internal/gateway/middleware"
 )
 
@@ -16,7 +17,8 @@ func main() {
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/public", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("Public route - no auth needed!"))
+		req := adaptor.HTTPToInternal(r)
+		w.Write([]byte("Public route - Method: " + req.Method + " Path: " + req.Path))
 	})
 
 	mux.Handle("/private", middleware.AuthMiddleware(
@@ -42,7 +44,13 @@ func main() {
 		w.Write([]byte("V2 - Users list with more details!"))
 	})
 
-	handler := rateLimiter.Middleware(middleware.VersionMiddleware(mux))
+	handler := rateLimiter.Middleware(
+		middleware.TransformMiddleware(
+			adaptor.AdaptorMiddleware(
+				middleware.VersionMiddleware(mux),
+			),
+		),
+	)
 
 	err := http.ListenAndServe(":8081", handler)
 	if err != nil {

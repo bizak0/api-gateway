@@ -26,6 +26,14 @@ func main() {
 		}),
 	))
 
+	mux.Handle("/admin", middleware.AuthMiddleware(
+		middleware.RoleMiddleware("admin")(
+			http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.Write([]byte("Admin route - welcome admin!"))
+			}),
+		),
+	))
+
 	handler := rateLimiter.Middleware(mux)
 
 	err := http.ListenAndServe(":8081", handler)

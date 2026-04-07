@@ -15,9 +15,16 @@ func main() {
 
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte("API Gateway is running!"))
+	mux.HandleFunc("/public", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("Public route - no auth needed!"))
 	})
+
+	mux.Handle("/private", middleware.AuthMiddleware(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			user := r.Context().Value(middleware.UserKey)
+			w.Write([]byte("Private route - welcome " + user.(string) + "!"))
+		}),
+	))
 
 	handler := rateLimiter.Middleware(mux)
 

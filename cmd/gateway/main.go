@@ -34,7 +34,15 @@ func main() {
 		),
 	))
 
-	handler := rateLimiter.Middleware(mux)
+	mux.HandleFunc("/v1/users", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("V1 - Users list"))
+	})
+
+	mux.HandleFunc("/v2/users", func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte("V2 - Users list with more details!"))
+	})
+
+	handler := rateLimiter.Middleware(middleware.VersionMiddleware(mux))
 
 	err := http.ListenAndServe(":8081", handler)
 	if err != nil {

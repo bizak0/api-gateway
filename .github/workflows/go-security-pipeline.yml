@@ -88,8 +88,10 @@ jobs:
       - name: Démarrage du gateway en arrière-plan
         run: |
           ./gateway &
-          sleep 5
-        # NB : Adaptez le port si votre gateway n'écoute pas sur 8080
+          echo "Gateway lancé, attente du démarrage..."
+          sleep 10
+          # Vérifier que le gateway répond bien sur le port 8081
+          curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8081/public || echo "Gateway pas encore prêt"
 
       - name: Autoriser les permissions d'écriture pour ZAP
         run: chmod 777 $GITHUB_WORKSPACE
@@ -99,7 +101,7 @@ jobs:
         env:
           ZAP_AUTH_HEADER: "Authorization"
           ZAP_AUTH_HEADER_VALUE: "${{ secrets.ZAP_AUTH_TOKEN }}"
-          ZAP_AUTH_HEADER_SITE: "http://localhost:8080"
+          ZAP_AUTH_HEADER_SITE: "http://localhost:8081"
         with:
-          target: 'http://localhost:8080'
+          target: 'http://localhost:8081'
           fail_action: false   # ne bloque pas le pipeline, remonte juste un rapport

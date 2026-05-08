@@ -51,17 +51,18 @@ jobs:
       - name: Scan des dépendances Go (go.mod)
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'          # scan du système de fichiers
-          scan-ref: '.'            # depuis la racine du projet
-          format: 'table'          # affichage en tableau dans les logs
-          exit-code: '0'           # ne bloque pas le pipeline sur avertissement
-          ignore-unfixed: true     # ignore les CVE sans correctif disponible
-          vuln-type: 'library'     # cible uniquement les dépendances
+          scan-type: 'fs'           # scan du système de fichiers
+          scan-ref: '.'             # depuis la racine du projet
+          format: 'table'           # affichage en tableau dans les logs
+          exit-code: '0'            # ne bloque pas le pipeline sur avertissement
+          ignore-unfixed: true      # ignore les CVE sans correctif disponible
+          vuln-type: 'library'      # cible uniquement les dépendances
           severity: 'HIGH,CRITICAL' # remonte uniquement les failles graves
 
   # -------------------------------------------------------
   # JOB 3 : DAST - Analyse Dynamique (test en conditions réelles)
-  # Outil : OWASP ZAP (attaque le gateway lancé en live)
+  # Outil : OWASP ZAP
+  # Chaîne complète : Proxy(:8443) -> Gateway(:8081) -> LoadBalancer(:8082)
   # -------------------------------------------------------
   dast-scan:
     name: Analyse Dynamique OWASP ZAP
@@ -82,26 +83,46 @@ jobs:
       - name: Installation des dépendances Go
         run: go mod download
 
-      - name: Compilation du gateway
-        run: go build -o gateway ./cmd/gateway
+      # Compilation des 3 composants
+      - name: Compilation des 3 composants
+        run: |
+          go build -o loadbalancer ./cmd/loadbalancer
+          go build -o gateway ./cmd/gateway
+          go build -o proxy ./cmd/proxy
 
-      - name: Démarrage du gateway en arrière-plan
+      # Demarrage dans le bon ordre : LB d'abord, puis Gateway, puis Proxy
+      - name: Démarrage du Load Balancer (:8082)
+        run: |
+          ./loadbalancer &
+          sleep 3
+          echo "Load Balancer démarré sur :8082"
+
+      - name: Démarrage du API Gateway (:8081)
         run: |
           ./gateway &
-          echo "Gateway lancé, attente du démarrage..."
-          sleep 10
-          # Vérifier que le gateway répond bien sur le port 8081
+          sleep 3
           curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8081/public || echo "Gateway pas encore prêt"
+          echo "API Gateway démarré sur :8081"
+
+      # Reverse Proxy = vrai point d'entrée (HTTPS :8443)
+      - name: Démarrage du Reverse Proxy TLS (:8443)
+        run: |
+          ./proxy &
+          sleep 5
+          echo "Reverse Proxy TLS démarré sur :8443"
 
       - name: Autoriser les permissions d'écriture pour ZAP
         run: chmod 777 $GITHUB_WORKSPACE
 
-      - name: Scan OWASP ZAP (avec token d'authentification)
+      # ZAP cible le Reverse Proxy (point d'entrée réel de la chaîne)
+      # cmd_options permet à ZAP d'ignorer le certificat TLS auto-signé
+      - name: Scan OWASP ZAP (via Reverse Proxy HTTPS)
         uses: zaproxy/action-baseline@v0.14.0
         env:
           ZAP_AUTH_HEADER: "Authorization"
           ZAP_AUTH_HEADER_VALUE: "${{ secrets.ZAP_AUTH_TOKEN }}"
-          ZAP_AUTH_HEADER_SITE: "http://localhost:8081"
+          ZAP_AUTH_HEADER_SITE: "https://localhost:8443"
         with:
-          target: 'http://localhost:8081'
-          fail_action: false   # ne bloque pas le pipeline, remonte juste un rapport
+          target: 'https://localhost:8443'
+          cmd_options: '-z "-config network.tls.trustAllCerts=true"'
+          fail_action: false

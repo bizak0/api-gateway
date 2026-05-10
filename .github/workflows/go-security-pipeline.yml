@@ -36,7 +36,45 @@ jobs:
         uses: github/codeql-action/analyze@v3
 
   # -------------------------------------------------------
-  # JOB 2 : SCA - Analyse des dépendances Go
+  # JOB 2 : Secret Scanning - Détection de secrets dans le code
+  # Outil : Gitleaks (clés API, tokens, mots de passe commités)
+  # -------------------------------------------------------
+  secret-scan:
+    name: Secret Scanning (Gitleaks)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupération du code (historique complet)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Installation de Gitleaks
+        run: |
+          wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz
+          tar -xzf gitleaks_8.18.4_linux_x64.tar.gz
+          sudo mv gitleaks /usr/local/bin/
+
+      - name: Scan des secrets dans le code et l'historique git
+        run: |
+          gitleaks detect --source . --verbose \
+            --report-format json \
+            --report-path gitleaks-report.json || true
+
+      - name: Affichage du résumé des secrets détectés
+        run: |
+          echo "=== Secrets détectés par Gitleaks ==="
+          cat gitleaks-report.json 2>/dev/null || echo "Aucun rapport généré"
+
+      - name: Upload du rapport Gitleaks
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gitleaks-report
+          path: gitleaks-report.json
+
+  # -------------------------------------------------------
+  # JOB 3 : SCA - Analyse des dépendances Go
   # Outil : Trivy (vérifie les CVE dans go.mod / go.sum)
   # -------------------------------------------------------
   sca-scan:

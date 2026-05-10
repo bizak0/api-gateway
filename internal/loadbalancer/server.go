@@ -23,17 +23,16 @@ type LoadBalancer struct {
 	retry    *resilience.RetryConfig
 }
 
-func NewLoadBalancer() *LoadBalancer {
+func NewLoadBalancer(healthInterval time.Duration, cbMaxFailures int, cbResetTimeout time.Duration, retryMax int, retryDelay time.Duration) *LoadBalancer {
 	reg := registry.NewRegistry()
-	checker := health.NewHealthChecker(reg, 10*time.Second)
+	checker := health.NewHealthChecker(reg, healthInterval)
 	checker.Start()
-
 	return &LoadBalancer{
 		registry: reg,
 		balancer: balancer.NewRoundRobin(),
 		router:   router.NewRouter(),
-		breaker:  resilience.NewCircuitBreaker(3, 30*time.Second),
-		retry:    resilience.NewRetryConfig(3, 1*time.Second),
+		breaker:  resilience.NewCircuitBreaker(cbMaxFailures, cbResetTimeout),
+		retry:    resilience.NewRetryConfig(retryMax, retryDelay),
 	}
 }
 
@@ -52,13 +51,21 @@ func (lb *LoadBalancer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	services := lb.registry.GetHealthy()
-	if len(services) == 0 {
-		http.Error(w, "No healthy services available", http.StatusServiceUnavailable)
-		return
+	var service *registry.Service
+
+	if serviceName := lb.router.Match(r.URL.Path); serviceName != "" {
+		service = lb.registry.GetByID(serviceName)
 	}
 
-	service := lb.balancer.Next(services)
+	if service == nil {
+		services := lb.registry.GetHealthy()
+		if len(services) == 0 {
+			http.Error(w, "No healthy services available", http.StatusServiceUnavailable)
+			return
+		}
+		service = lb.balancer.Next(services)
+	}
+
 	if service == nil {
 		http.Error(w, "No service available", http.StatusServiceUnavailable)
 		return

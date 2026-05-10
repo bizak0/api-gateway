@@ -6,19 +6,28 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 
 	"github.com/bizak0/api-gateway/internal/gateway/adaptor"
 	"github.com/bizak0/api-gateway/internal/gateway/middleware"
 )
 
+func getEnv(key, fallback string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return fallback
+}
+
 func main() {
+	lbAddr := getEnv("LOADBALANCER_URL", "http://localhost:8082")
+
 	fmt.Println("API Gateway starting on port 8081...")
-	fmt.Println("Forwarding to Load Balancer on port 8082...")
+	fmt.Printf("Forwarding to Load Balancer at %s...\n", lbAddr)
 
 	rateLimiter := middleware.NewRateLimiter(5, 10)
 
-	// ✅ NOUVEAU : reverse proxy interne vers le Load Balancer
-	lbURL, err := url.Parse("http://localhost:8082")
+	lbURL, err := url.Parse(lbAddr)
 	if err != nil {
 		log.Fatal("Erreur parsing URL Load Balancer:", err)
 	}

@@ -1,6 +1,5 @@
 name: Go API Gateway - Security Pipeline
 
-# Déclenchement : à chaque push ou pull request sur la branche main
 on:
   push:
     branches: [ "main" ]
@@ -51,18 +50,18 @@ jobs:
       - name: Scan des dépendances Go (go.mod)
         uses: aquasecurity/trivy-action@master
         with:
-          scan-type: 'fs'           # scan du système de fichiers
-          scan-ref: '.'             # depuis la racine du projet
-          format: 'table'           # affichage en tableau dans les logs
-          exit-code: '0'            # ne bloque pas le pipeline sur avertissement
-          ignore-unfixed: true      # ignore les CVE sans correctif disponible
-          vuln-type: 'library'      # cible uniquement les dépendances
-          severity: 'HIGH,CRITICAL' # remonte uniquement les failles graves
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'table'
+          exit-code: '0'
+          ignore-unfixed: true
+          vuln-type: 'library'
+          severity: 'HIGH,CRITICAL'
 
   # -------------------------------------------------------
   # JOB 3 : DAST - Analyse Dynamique (test en conditions réelles)
   # Outil : OWASP ZAP
-  # Chaîne complète : Proxy(:8443) -> Gateway(:8081) -> LoadBalancer(:8082)
+  # Chaîne complète : Proxy(:8443) -> Gateway(:8081) -> LoadBalancer(:8082) -> Mocks
   # -------------------------------------------------------
   dast-scan:
     name: Analyse Dynamique OWASP ZAP
@@ -78,19 +77,42 @@ jobs:
       - name: Installation de Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: '1.25'
 
       - name: Installation des dépendances Go
         run: go mod download
 
-      # Compilation des 3 composants
       - name: Compilation des 3 composants
         run: |
           go build -o loadbalancer ./cmd/loadbalancer
           go build -o gateway ./cmd/gateway
           go build -o proxy ./cmd/proxy
 
-      # Demarrage dans le bon ordre : LB d'abord, puis Gateway, puis Proxy
+      - name: Génération du certificat TLS auto-signé
+        run: |
+          openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem \
+            -days 1 -nodes -subj "/CN=localhost"
+
+      - name: Démarrage des microservices mock
+        run: |
+          start_mock() {
+            python3 -c "
+          from http.server import BaseHTTPRequestHandler, HTTPServer
+          class H(BaseHTTPRequestHandler):
+              def do_GET(self):
+                  self.send_response(200)
+                  self.send_header('Content-Type', 'application/json')
+                  self.end_headers()
+                  self.wfile.write(b'{\"status\":\"ok\"}')
+              def log_message(self, *a): pass
+          HTTPServer(('', $1), H).serve_forever()" &
+          }
+          start_mock 9091
+          start_mock 9092
+          start_mock 9093
+          sleep 3
+          echo "Mocks démarrés sur 9091, 9092, 9093"
+
       - name: Démarrage du Load Balancer (:8082)
         run: |
           ./loadbalancer &
@@ -101,10 +123,9 @@ jobs:
         run: |
           ./gateway &
           sleep 3
-          curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8081/public || echo "Gateway pas encore prêt"
+          curl --retry 5 --retry-delay 2 --retry-connrefused http://localhost:8081/public || true
           echo "API Gateway démarré sur :8081"
 
-      # Reverse Proxy = vrai point d'entrée (HTTPS :8443)
       - name: Démarrage du Reverse Proxy TLS (:8443)
         run: |
           ./proxy &
@@ -114,8 +135,6 @@ jobs:
       - name: Autoriser les permissions d'écriture pour ZAP
         run: chmod 777 $GITHUB_WORKSPACE
 
-      # ZAP cible le Reverse Proxy (point d'entrée réel de la chaîne)
-      # cmd_options permet à ZAP d'ignorer le certificat TLS auto-signé
       - name: Scan OWASP ZAP (via Reverse Proxy HTTPS)
         uses: zaproxy/action-baseline@v0.14.0
         env:

@@ -52,6 +52,17 @@ func (r *Registry) GetHealthy() []*Service {
 	return healthy
 }
 
+func (r *Registry) GetByID(id string) *Service {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	s, exists := r.services[id]
+	if !exists || !s.Healthy {
+		return nil
+	}
+	return s
+}
+
 func (r *Registry) SetHealth(id string, healthy bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

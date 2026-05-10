@@ -36,6 +36,9 @@ func (rp *ReverseProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if entry, found := rp.cache.Get(cacheKey); found {
 		log.Printf("Cache HIT: %s", cacheKey)
+		for k := range w.Header() {
+			delete(w.Header(), k)
+		}
 		for k, v := range entry.Headers {
 			w.Header()[k] = v
 		}

@@ -1,0 +1,112 @@
+version: '3.8'
+
+# =============================================================
+# Architecture complète :
+# Client → Proxy(:8443/TLS) → Gateway(:8081) → LB(:8082) → MS
+# =============================================================
+
+services:
+
+  # ----------------------------------------------------------
+  # MICROSERVICES (simulés avec nginx)
+  # ----------------------------------------------------------
+  users-service:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/users.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  orders-service:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/orders.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  admin-service:
+    image: nginx:alpine
+    volumes:
+      - ./nginx/admin.conf:/etc/nginx/conf.d/default.conf:ro
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------
+  # LOAD BALANCER (:8082)
+  # Dépend des MS — démarre après eux
+  # ----------------------------------------------------------
+  loadbalancer:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.loadbalancer
+    ports:
+      - "8082:8082"
+    networks:
+      - backend
+    depends_on:
+      users-service:
+        condition: service_healthy
+      orders-service:
+        condition: service_healthy
+      admin-service:
+        condition: service_healthy
+    environment:
+    - USERS_SERVICE_URL=http://users-service:80
+    - ORDERS_SERVICE_URL=http://orders-service:80
+    - ADMIN_SERVICE_URL=http://admin-service:80
+
+  # ----------------------------------------------------------
+  # API GATEWAY (:8081)
+  # Dépend du Load Balancer
+  # ----------------------------------------------------------
+  gateway:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.gateway
+    ports:
+      - "8081:8081"
+    networks:
+      - frontend
+      - backend
+    depends_on:
+      - loadbalancer
+    environment:
+      - LOADBALANCER_URL=http://loadbalancer:8082
+
+  # ----------------------------------------------------------
+  # REVERSE PROXY (:8443/TLS) — point d'entrée public
+  # Dépend du Gateway
+  # ----------------------------------------------------------
+  proxy:
+    build:
+      context: ..
+      dockerfile: deployments/Dockerfile.proxy
+    ports:
+      - "8443:8443"
+    networks:
+      - frontend
+    depends_on:
+      - gateway
+    environment:
+      - GATEWAY_URL=http://gateway:8081
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
